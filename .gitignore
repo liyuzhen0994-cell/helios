@@ -1,4 +1,4 @@
 # 开发工具不发布到线上
-dev/
+dev/*
 # 但排行榜的 Worker 部署代码要跟着仓库走
 !dev/leaderboard-worker.js
