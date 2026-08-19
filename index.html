@@ -152,6 +152,110 @@
   }
   #plushCounter.show { transform: translateX(0); }
   #plushCounter b { color: #FFFDE7; font-size: 17px; }
+
+  /* ---------- 掉落排行榜弹窗 ---------- */
+  #boardOverlay {
+    position: fixed;
+    inset: 0;
+    z-index: 150;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(16, 25, 46, 0.45);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease;
+  }
+  #boardOverlay.open { opacity: 1; pointer-events: auto; }
+  #boardPanel {
+    background: var(--panel);
+    border-radius: 18px;
+    width: min(420px, 92vw);
+    max-height: 78vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 18px 50px rgba(16, 25, 46, 0.35);
+    transform: translateY(12px) scale(0.97);
+    transition: transform 0.25s ease;
+  }
+  #boardOverlay.open #boardPanel { transform: none; }
+  #boardHead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 18px 12px;
+  }
+  #boardTitle { font-weight: 700; font-size: 17px; }
+  #boardClose {
+    border: none;
+    background: var(--accent-soft);
+    color: var(--ink);
+    width: 30px;
+    height: 30px;
+    border-radius: 10px;
+    font-size: 16px;
+    cursor: pointer;
+  }
+  #boardBody {
+    overflow-y: auto;
+    padding: 0 14px 10px;
+    min-height: 120px;
+  }
+  .board-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    font-size: 14px;
+  }
+  .board-row.mine { background: var(--accent-soft); }
+  .board-rank {
+    width: 26px;
+    text-align: center;
+    font-weight: 700;
+    color: var(--ink-soft);
+    font-variant-numeric: tabular-nums;
+  }
+  .board-row:nth-child(1) .board-rank { color: #d9a400; font-size: 18px; }
+  .board-row:nth-child(2) .board-rank { color: #8c939f; font-size: 18px; }
+  .board-row:nth-child(3) .board-rank { color: #b06f3a; font-size: 18px; }
+  .board-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .board-count { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .board-note { padding: 10px 4px 14px; color: var(--ink-soft); font-size: 13px; line-height: 1.6; }
+  #boardFoot {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 12px 14px 14px;
+    border-top: 1px solid rgba(16, 25, 46, 0.08);
+  }
+  #boardName {
+    flex: 1;
+    min-width: 0;
+    border: 1px solid rgba(16, 25, 46, 0.15);
+    border-radius: 10px;
+    padding: 8px 10px;
+    font-size: 13px;
+    font-family: inherit;
+    background: #fff;
+    color: var(--ink);
+  }
+  #boardReport {
+    border: none;
+    background: var(--accent);
+    color: #fff;
+    font-weight: 600;
+    font-size: 13px;
+    padding: 9px 14px;
+    border-radius: 10px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  #boardReport:active { transform: scale(0.96); }
+  #boardMyTotal { padding: 0 4px 10px; font-size: 13px; color: var(--ink-soft); }
+  #boardMyTotal b { color: var(--ink); font-size: 15px; }
 </style>
 </head>
 <body>
@@ -174,8 +278,25 @@
     <input type="checkbox" id="audioCheckbox" checked>
     Audio
   </label>
+  <div class="secret-menu-item" id="boardButton">📊 掉落排行榜</div>
 </div>
 <div id="plushCounter"><b id="plushCount">0</b> plushies</div>
+
+<!-- 掉落排行榜弹窗 -->
+<div id="boardOverlay">
+  <div id="boardPanel">
+    <div id="boardHead">
+      <span id="boardTitle">Helios 掉落榜</span>
+      <button id="boardClose" aria-label="close">✕</button>
+    </div>
+    <div id="boardMyTotal"></div>
+    <div id="boardBody"><div class="board-note">加载中…</div></div>
+    <div id="boardFoot">
+      <input id="boardName" maxlength="16" placeholder="起个昵称">
+      <button id="boardReport">上报成绩</button>
+    </div>
+  </div>
+</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
 
@@ -433,7 +554,11 @@ const CONFIG = {
   // —— 手机窄屏变小，≥divisor 的宽屏保持原大小
   plushSize: [110, 150],
   plushScaleDivisor: 800,
-  plushScaleMin: 0.45
+  plushScaleMin: 0.45,
+  // 掉落排行榜：填上后端地址后自动启用（当前：自己的 heloba 后端）
+  // 留空 = 只显示本机总数，不联网
+  leaderboardApi: 'https://heloba.lancan.xyz/z',
+  leaderboardTitle: 'Helios 掉落榜'
 };
 
 function plushScale() {
@@ -619,6 +744,10 @@ function spawnObject(x, y) {
   });
   spawnOrder.push(body);
   Composite.add(world, body);
+
+  // 累计掉落数（排行榜用，持久化到本机）
+  totalDrops++;
+  try { localStorage.setItem(LS_TOTAL, String(totalDrops)); } catch (e) {}
 }
 
 /* ---------- 特殊款生成时的星光粒子 ---------- */
@@ -935,6 +1064,133 @@ canvas.addEventListener('pointerleave', handlePointerEnd);
 canvas.addEventListener('pointercancel', handlePointerEnd);
 window.addEventListener('blur', stopHold);
 document.addEventListener('visibilitychange', () => { if (document.hidden) stopHold(); });
+
+/* ============================================================
+   掉落排行榜：本机累计掉落数 + 可选云端排行（Cloudflare Worker）
+   昵称自动生成（"形容词+称呼#数字"），可改，存本机。
+   ============================================================ */
+const LS_TOTAL = 'helios_total_drops';
+const LS_DEVICE = 'helios_device_id';
+const LS_NAME = 'helios_nickname';
+
+let totalDrops = 0;
+try { totalDrops = parseInt(localStorage.getItem(LS_TOTAL) || '0', 10) || 0; } catch (e) {}
+
+let deviceId = '';
+try {
+  deviceId = localStorage.getItem(LS_DEVICE) || '';
+  if (!deviceId) {
+    deviceId = 'h-' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+    localStorage.setItem(LS_DEVICE, deviceId);
+  }
+} catch (e) { deviceId = 'h-nostore-' + Math.random().toString(36).slice(2, 10); }
+
+const NAME_ADJ = ['软乎乎', '咕噜噜', '蹦蹦跳', '圆滚滚', '毛茸茸', '草莓味', '闪电', '小太阳'];
+const NAME_NOUN = ['训练员', '饲养员', '观测员', '收藏家', '捡球人'];
+function makeNickname() {
+  return randomFrom(NAME_ADJ) + randomFrom(NAME_NOUN) + '#' + Math.floor(1000 + Math.random() * 9000);
+}
+let playerName = '';
+try { playerName = localStorage.getItem(LS_NAME) || ''; } catch (e) {}
+if (!playerName) {
+  playerName = makeNickname();
+  try { localStorage.setItem(LS_NAME, playerName); } catch (e) {}
+}
+
+const boardOverlay = document.getElementById('boardOverlay');
+const boardTitle = document.getElementById('boardTitle');
+const boardBody = document.getElementById('boardBody');
+const boardMyTotal = document.getElementById('boardMyTotal');
+const boardName = document.getElementById('boardName');
+const boardReport = document.getElementById('boardReport');
+const boardButton = document.getElementById('boardButton');
+const boardClose = document.getElementById('boardClose');
+
+boardTitle.textContent = CONFIG.leaderboardTitle;
+boardName.value = playerName;
+
+boardName.addEventListener('change', () => {
+  playerName = (boardName.value.trim() || makeNickname()).slice(0, 16);
+  boardName.value = playerName;
+  try { localStorage.setItem(LS_NAME, playerName); } catch (e) {}
+});
+
+function renderBoard(list) {
+  if (!list || list.length === 0) {
+    boardBody.innerHTML = '<div class="board-note">还没有人上榜，快来当第一名！</div>';
+    return;
+  }
+  boardBody.innerHTML = list.slice(0, 20).map((e, i) => {
+    const mine = e.device && e.device === deviceId;
+    return '<div class="board-row' + (mine ? ' mine' : '') + '">' +
+      '<span class="board-rank">' + (i + 1) + '</span>' +
+      '<span class="board-name">' + escapeHtml(String(e.name || '匿名')) + (mine ? '（我）' : '') + '</span>' +
+      '<span class="board-count">' + (e.count | 0) + '</span>' +
+      '</div>';
+  }).join('');
+}
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+async function reportScore() {
+  if (!CONFIG.leaderboardApi || totalDrops <= 0) return;
+  try {
+    await fetch(CONFIG.leaderboardApi, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: playerName, count: totalDrops, device: deviceId })
+    });
+  } catch (e) { /* 网络失败静默，下次再报 */ }
+}
+
+async function openBoard() {
+  secretMenu.classList.remove('open');
+  boardOverlay.classList.add('open');
+  boardMyTotal.innerHTML = '我的累计掉落：<b>' + totalDrops + '</b> 只';
+  if (!CONFIG.leaderboardApi) {
+    boardBody.innerHTML = '<div class="board-note">未配置排行榜服务器（index.html 里 CONFIG.leaderboardApi 留空了）。<br>按 README「排行榜」一节配置 Cloudflare Worker 后，这里会显示全站排行。</div>';
+    return;
+  }
+  boardBody.innerHTML = '<div class="board-note">加载中…</div>';
+  await reportScore(); // 打开即上报一次自己的成绩
+  try {
+    const res = await fetch(CONFIG.leaderboardApi);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    renderBoard(await res.json());
+  } catch (e) {
+    boardBody.innerHTML = '<div class="board-note">排行榜加载失败（服务器没配好或网络问题）。我的累计掉落 <b>' + totalDrops + '</b> 只已保存在本机。</div>';
+  }
+}
+
+boardButton.addEventListener('click', openBoard);
+boardClose.addEventListener('click', () => boardOverlay.classList.remove('open'));
+boardOverlay.addEventListener('click', (e) => {
+  if (e.target === boardOverlay) boardOverlay.classList.remove('open');
+});
+boardReport.addEventListener('click', async () => {
+  await reportScore();
+  boardReport.textContent = '已上报 ✓';
+  setTimeout(() => { boardReport.textContent = '上报成绩'; }, 1200);
+  if (CONFIG.leaderboardApi) {
+    try {
+      const res = await fetch(CONFIG.leaderboardApi);
+      if (res.ok) renderBoard(await res.json());
+    } catch (e) {}
+  }
+});
+
+// 关页面时用 sendBeacon 最后补报一次
+window.addEventListener('beforeunload', () => {
+  if (!CONFIG.leaderboardApi || totalDrops <= 0) return;
+  try {
+    navigator.sendBeacon(CONFIG.leaderboardApi, new Blob(
+      [JSON.stringify({ name: playerName, count: totalDrops, device: deviceId })],
+      { type: 'application/json' }
+    ));
+  } catch (e) {}
+});
 
 /* ============================================================
    启动：后台静默加载素材，直接进入界面
