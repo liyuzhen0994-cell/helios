@@ -257,15 +257,6 @@
   #boardMyTotal { padding: 0 4px 10px; font-size: 13px; color: var(--ink-soft); }
   #boardMyTotal b { color: var(--ink); font-size: 15px; }
 
-  /* ---------- 排行榜顶部动图 ---------- */
-  #boardGif {
-    display: block;
-    width: 100%;
-    height: 150px;
-    object-fit: cover;
-    background: #111;
-  }
-
   /* ---------- 成就区 ---------- */
   #achSection {
     border-top: 1px solid rgba(16, 25, 46, 0.08);
@@ -347,7 +338,6 @@
 <!-- 掉落排行榜弹窗 -->
 <div id="boardOverlay">
   <div id="boardPanel">
-    <img id="boardGif" alt="helios">
     <div id="boardHead">
       <span id="boardTitle">Helios 掉落榜</span>
       <button id="boardClose" aria-label="close">✕</button>
@@ -1321,12 +1311,6 @@ async function openBoard() {
   secretMenu.classList.remove('open');
   boardOverlay.classList.add('open');
   boardMyTotal.innerHTML = '我的累计掉落：<b>' + totalDrops + '</b> 只';
-  // 顶部大动图（12.8MB）只在第一次打开时加载，避免拖慢首屏
-  const gifEl = document.getElementById('boardGif');
-  if (gifEl && !gifEl.dataset.loaded) {
-    gifEl.dataset.loaded = '1';
-    gifEl.src = 'assets/board.gif';
-  }
   renderAchievements();
   if (!CONFIG.leaderboardApi) {
     boardBody.innerHTML = '<div class="board-note">未配置排行榜服务器（index.html 里 CONFIG.leaderboardApi 留空了）。<br>按 README「排行榜」一节配置 Cloudflare Worker 后，这里会显示全站排行。</div>';
