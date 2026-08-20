@@ -256,6 +256,61 @@
   #boardReport:active { transform: scale(0.96); }
   #boardMyTotal { padding: 0 4px 10px; font-size: 13px; color: var(--ink-soft); }
   #boardMyTotal b { color: var(--ink); font-size: 15px; }
+
+  /* ---------- 排行榜顶部动图 ---------- */
+  #boardGif {
+    display: block;
+    width: 100%;
+    height: 150px;
+    object-fit: cover;
+    background: #111;
+  }
+
+  /* ---------- 成就区 ---------- */
+  #achSection {
+    border-top: 1px solid rgba(16, 25, 46, 0.08);
+    margin-top: 8px;
+    padding: 10px 14px 14px;
+  }
+  #achTitle { font-weight: 700; font-size: 14px; margin-bottom: 8px; }
+  .ach-row {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 7px 10px;
+    border-radius: 10px;
+    background: #f6f3ea;
+    margin-bottom: 6px;
+    font-size: 13px;
+  }
+  .ach-row.unlocked { background: #fff8dc; border: 1px solid #e8d47c; }
+  .ach-icon { font-size: 18px; }
+  .ach-info { flex: 1; min-width: 0; }
+  .ach-name { font-weight: 600; }
+  .ach-desc { color: var(--ink-soft); font-size: 12px; }
+  .ach-status { font-weight: 700; font-size: 12px; white-space: nowrap; }
+  .ach-row.unlocked .ach-status { color: #b8860b; }
+  .ach-row:not(.unlocked) .ach-status { color: #9aa1ae; }
+
+  /* ---------- 成就解锁提示 ---------- */
+  #achToast {
+    position: fixed;
+    top: 14px;
+    left: 50%;
+    transform: translateX(-50%) translateY(-140%);
+    z-index: 180;
+    background: var(--ink);
+    color: #FFF3B0;
+    padding: 12px 20px;
+    border-radius: 14px;
+    font-size: 14px;
+    box-shadow: 0 10px 30px rgba(16, 25, 46, 0.4);
+    transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+    pointer-events: none;
+    white-space: nowrap;
+  }
+  #achToast.show { transform: translateX(-50%) translateY(0); }
+  #achToast b { color: #FFE066; }
 </style>
 </head>
 <body>
@@ -275,6 +330,10 @@
     Mobile Gravity Mode
   </label>
   <label class="secret-menu-item">
+    <input type="checkbox" id="takeoffCheckbox">
+    Takeoff Mode 起飞
+  </label>
+  <label class="secret-menu-item">
     <input type="checkbox" id="audioCheckbox" checked>
     Audio
   </label>
@@ -282,15 +341,23 @@
 </div>
 <div id="plushCounter"><b id="plushCount">0</b> plushies</div>
 
+<!-- 成就解锁提示 -->
+<div id="achToast">🏆 成就解锁：<b id="achToastTitle"></b></div>
+
 <!-- 掉落排行榜弹窗 -->
 <div id="boardOverlay">
   <div id="boardPanel">
+    <img id="boardGif" alt="helios">
     <div id="boardHead">
       <span id="boardTitle">Helios 掉落榜</span>
       <button id="boardClose" aria-label="close">✕</button>
     </div>
     <div id="boardMyTotal"></div>
     <div id="boardBody"><div class="board-note">加载中…</div></div>
+    <div id="achSection">
+      <div id="achTitle">🏆 成就</div>
+      <div id="achList"></div>
+    </div>
     <div id="boardFoot">
       <input id="boardName" maxlength="16" placeholder="起个昵称">
       <button id="boardReport">上报成绩</button>
@@ -748,6 +815,8 @@ function spawnObject(x, y) {
   // 累计掉落数（排行榜用，持久化到本机）
   totalDrops++;
   try { localStorage.setItem(LS_TOTAL, String(totalDrops)); } catch (e) {}
+  // 成就：掉落第 1 只 → 初次wei面
+  if (totalDrops === 1) unlockAchievement('first_wei');
 }
 
 /* ---------- 特殊款生成时的星光粒子 ---------- */
@@ -843,6 +912,11 @@ function render() {
     if (!meta) continue;
 
     meta.squash += (1 - meta.squash) * 0.2;
+    // 起飞模式漂浮结束 → 恢复常态空气阻力
+    if (meta.takeoffRestoreAt && now > meta.takeoffRestoreAt) {
+      meta.takeoffRestoreAt = 0;
+      body.frictionAir = 0.0015;
+    }
     const scaleY = meta.squash;
     const scaleX = 1 + (1 - meta.squash) * 0.35;
 
@@ -889,6 +963,7 @@ const secretToggle = document.getElementById('secretToggle');
 const secretMenu = document.getElementById('secretMenu');
 const unlimitedCheckbox = document.getElementById('unlimitedCheckbox');
 const mobileGravityCheckbox = document.getElementById('mobileGravityCheckbox');
+const takeoffCheckbox = document.getElementById('takeoffCheckbox');
 const audioCheckbox = document.getElementById('audioCheckbox');
 const hint = document.getElementById('hint');
 
@@ -916,7 +991,7 @@ const SHAKE_DELTA_THRESHOLD = 16;
 const SHAKE_COOLDOWN = 450;
 
 function handleMotion(event) {
-  if (!mobileGravityEnabled) return;
+  if (!mobileGravityEnabled && !takeoffMode) return;
   const acc = event.accelerationIncludingGravity || event.acceleration;
   if (!acc || acc.x === null) return;
   if (lastMotion) {
@@ -925,11 +1000,44 @@ function handleMotion(event) {
     const now = performance.now();
     if (delta > SHAKE_DELTA_THRESHOLD && now - lastShakeTime > SHAKE_COOLDOWN) {
       lastShakeTime = now;
-      scatterPlushies(dx, dy, delta);
+      // 起飞模式优先：摇晃 → 全体飞起；否则重力模式：散射
+      if (takeoffMode) takeoffPlushies(dx, dy, delta);
+      else if (mobileGravityEnabled) scatterPlushies(dx, dy, delta);
+      // 成就：开启重力模式后第一次晃动手机
+      if (mobileGravityEnabled) unlockAchievement('gravity_shake');
     }
   }
   lastMotion = { x: acc.x, y: acc.y, z: acc.z };
 }
+
+/* ---------- 起飞模式：摇晃 → 角色飞起，再缓缓落下 ---------- */
+let takeoffMode = false;
+const TAKEOFF_FLOAT_AIR = 0.028;  // 起飞后短暂的高空气阻力（缓缓落下）
+const TAKEOFF_FLOAT_MS = 3800;    // 漂浮持续时长 ms
+
+function takeoffPlushies(dirX = 0, dirY = 0, intensityRaw = 0) {
+  const intensity = Math.min(1.6, intensityRaw / 12);
+  const lift = 11 + Common.random(2, 5) + intensity * 3;
+  for (const body of Composite.allBodies(world)) {
+    const meta = bodyMeta.get(body.id);
+    if (!meta) continue;
+    const vx = body.velocity.x * 0.6 + Common.random(-3, 3);
+    Body.setVelocity(body, { x: vx, y: -lift });
+    body.frictionAir = TAKEOFF_FLOAT_AIR;
+    meta.takeoffRestoreAt = performance.now() + TAKEOFF_FLOAT_MS;
+  }
+}
+
+// 键盘 T：桌面/无传感器设备上模拟"摇一摇"（测试起飞与散射）
+window.addEventListener('keydown', (e) => {
+  if (e.key !== 't' && e.key !== 'T') return;
+  const a = Common.random(0, Math.PI * 2);
+  if (takeoffMode) takeoffPlushies(Math.cos(a), Math.sin(a), 24);
+  else if (mobileGravityEnabled) {
+    scatterPlushies(Math.cos(a), Math.sin(a), 24);
+    unlockAchievement('gravity_shake');
+  }
+});
 
 function scatterPlushies(dirX = 0, dirY = 0, intensityRaw = 0) {
   const len = Math.hypot(dirX, dirY);
@@ -1003,6 +1111,22 @@ mobileGravityCheckbox.addEventListener('change', async () => {
   }
 });
 
+/* 起飞模式开关：共用传感器权限 */
+takeoffCheckbox.addEventListener('change', async () => {
+  if (takeoffCheckbox.checked) {
+    if (!mobileGravityPermitted) {
+      takeoffCheckbox.disabled = true;
+      const granted = await requestMobileGravityPermission();
+      takeoffCheckbox.disabled = false;
+      if (!granted) { takeoffCheckbox.checked = false; return; }
+      mobileGravityPermitted = true;
+    }
+    takeoffMode = true;
+  } else {
+    takeoffMode = false;
+  }
+});
+
 /* ============================================================
    指针交互：点击生成 + 按住连发 + 安全网
    ============================================================ */
@@ -1010,6 +1134,7 @@ const HOLD_DELAY = CONFIG.holdDelay;
 const SPAWN_COOLDOWN = CONFIG.spawnCooldown;
 let holdTimeout = null;
 let spawnInterval = null;
+let holdStartTime = 0;
 let lastPointer = { x: 0, y: 0 };
 let activePointerId = null;
 let interacted = false;
@@ -1017,6 +1142,7 @@ let interacted = false;
 function startHold(x, y) {
   lastPointer.x = x;
   lastPointer.y = y;
+  holdStartTime = performance.now();
   const w = screenToWorld(x, y);
   spawnObject(w.x, w.y);
   holdTimeout = setTimeout(() => {
@@ -1025,6 +1151,8 @@ function startHold(x, y) {
       const jitter = Common.random(-60, 60) * plushScale();
       const w2 = screenToWorld(lastPointer.x + jitter, lastPointer.y);
       spawnObject(w2.x, w2.y);
+      // 成就：长按连发超过 5 秒 → wei到飞起
+      if (performance.now() - holdStartTime >= 5000) unlockAchievement('hold_5s');
     }, SPAWN_COOLDOWN);
   }, HOLD_DELAY);
 }
@@ -1035,6 +1163,7 @@ function stopHold() {
   holdTimeout = null;
   spawnInterval = null;
   activePointerId = null;
+  holdStartTime = 0;
 }
 
 canvas.addEventListener('pointerdown', (e) => {
@@ -1064,6 +1193,49 @@ canvas.addEventListener('pointerleave', handlePointerEnd);
 canvas.addEventListener('pointercancel', handlePointerEnd);
 window.addEventListener('blur', stopHold);
 document.addEventListener('visibilitychange', () => { if (document.hidden) stopHold(); });
+
+/* ============================================================
+   成就系统：三枚成就，解锁弹 toast + 排行榜面板里展示
+   ============================================================ */
+const LS_ACH = 'helios_achievements';
+const ACHIEVEMENTS = [
+  { id: 'first_wei', icon: '🐣', name: '初次wei面', desc: '掉落第 1 只 Helios' },
+  { id: 'hold_5s', icon: '🚀', name: 'wei到飞起', desc: '长按连发超过 5 秒' },
+  { id: 'gravity_shake', icon: '☀️', name: '太阳神能飞~', desc: '首次开启重力模式后晃动手机' }
+];
+let unlockedAch = [];
+try { unlockedAch = JSON.parse(localStorage.getItem(LS_ACH) || '[]'); } catch (e) { unlockedAch = []; }
+
+const achToast = document.getElementById('achToast');
+const achToastTitle = document.getElementById('achToastTitle');
+let achToastTimer = null;
+
+function renderAchievements() {
+  const el = document.getElementById('achList');
+  if (!el) return;
+  el.innerHTML = ACHIEVEMENTS.map(a => {
+    const u = unlockedAch.includes(a.id);
+    return '<div class="ach-row' + (u ? ' unlocked' : '') + '">' +
+      '<span class="ach-icon">' + a.icon + '</span>' +
+      '<span class="ach-info"><span class="ach-name">' + a.name + '</span>' +
+      '<br><span class="ach-desc">' + a.desc + '</span></span>' +
+      '<span class="ach-status">' + (u ? '已解锁 ✓' : '未解锁') + '</span></div>';
+  }).join('');
+}
+
+function unlockAchievement(id) {
+  if (unlockedAch.includes(id)) return;
+  const a = ACHIEVEMENTS.find(x => x.id === id);
+  if (!a) return;
+  unlockedAch.push(id);
+  try { localStorage.setItem(LS_ACH, JSON.stringify(unlockedAch)); } catch (e) {}
+  achToastTitle.textContent = a.name;
+  achToast.classList.add('show');
+  clearTimeout(achToastTimer);
+  achToastTimer = setTimeout(() => achToast.classList.remove('show'), 2800);
+  playOneShot('assets/audio/special1.mp3');
+  renderAchievements();
+}
 
 /* ============================================================
    掉落排行榜：本机累计掉落数 + 可选云端排行（Cloudflare Worker）
@@ -1149,6 +1321,13 @@ async function openBoard() {
   secretMenu.classList.remove('open');
   boardOverlay.classList.add('open');
   boardMyTotal.innerHTML = '我的累计掉落：<b>' + totalDrops + '</b> 只';
+  // 顶部大动图（12.8MB）只在第一次打开时加载，避免拖慢首屏
+  const gifEl = document.getElementById('boardGif');
+  if (gifEl && !gifEl.dataset.loaded) {
+    gifEl.dataset.loaded = '1';
+    gifEl.src = 'assets/board.gif';
+  }
+  renderAchievements();
   if (!CONFIG.leaderboardApi) {
     boardBody.innerHTML = '<div class="board-note">未配置排行榜服务器（index.html 里 CONFIG.leaderboardApi 留空了）。<br>按 README「排行榜」一节配置 Cloudflare Worker 后，这里会显示全站排行。</div>';
     return;
